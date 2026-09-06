@@ -1,0 +1,9 @@
+import { expect, test } from "@playwright/test";
+const api = process.env.E2E_API_URL ?? "http://127.0.0.1:4000/api/v1";
+test.describe("API smoke tests",()=>{
+  test("health endpoint is available",async({request})=>{const response=await request.get(`${api}/health`);expect(response.ok()).toBeTruthy();expect(await response.json()).toMatchObject({status:"ok",service:"aurilink-api"});});
+  test("protected endpoints reject anonymous access",async({request})=>{expect((await request.get(`${api}/sales/summary`)).status()).toBe(401);});
+  test("admin can authenticate and read their profile",async({request})=>{const login=await request.post(`${api}/auth/login`,{data:{email:process.env.E2E_ADMIN_EMAIL??"admin@aurilink.local",password:process.env.E2E_ADMIN_PASSWORD??"ChangeMe123!"}});expect(login.ok()).toBeTruthy();const body=await login.json();expect(body.redirectTo).toBe("/admin");const profile=await request.get(`${api}/auth/me`,{headers:{Authorization:`Bearer ${body.accessToken}`}});expect(profile.ok()).toBeTruthy();expect((await profile.json()).roles).toContain("ADMIN");});
+  test("password change requires the current password",async({request})=>{const login=await request.post(`${api}/auth/login`,{data:{email:process.env.E2E_ADMIN_EMAIL??"admin@aurilink.local",password:process.env.E2E_ADMIN_PASSWORD??"ChangeMe123!"}}),body=await login.json();const response=await request.patch(`${api}/users/me/password`,{headers:{Authorization:`Bearer ${body.accessToken}`},data:{currentPassword:"IncorrectPassword!",newPassword:"UnusedNewPassword!"}});expect(response.status()).toBe(403);});
+  test("forgot password does not reveal account existence",async({request})=>{const response=await request.post(`${api}/auth/forgot-password`,{data:{email:"nonexistent-test@aurilink.invalid"}});expect(response.ok()).toBeTruthy();expect((await response.json()).message).toContain("If that email");});
+});

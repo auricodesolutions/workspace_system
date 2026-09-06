@@ -1,0 +1,19 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { ArrowDownLeft, ArrowLeft, ArrowUpRight, BriefcaseBusiness, WalletCards } from "lucide-react";
+import { authFetch, getSession } from "@/lib/auth";
+
+type Transaction = { id: string; type: "TASK_CREDIT" | "PAYMENT" | "ADJUSTMENT"; status: string; amount: string; balanceAfter: string; description: string; reference?: string; createdAt: string; task?: { title: string; revisionCount: number }; project?: { code: string; name: string } };
+type Wallet = { balance: string; currency: string; transactions: Transaction[] };
+
+export default function MyWalletPage() {
+  const [wallet, setWallet] = useState<Wallet | null>(null); const [isAdmin, setIsAdmin] = useState(false);
+  const load = useCallback(async () => { const response = await authFetch("/wallet/my"); if (response.ok) setWallet(await response.json()); }, []);
+  useEffect(() => { const session = getSession(); if (!session) return void window.location.replace("/login"); const timer = window.setTimeout(() => { setIsAdmin(session.user.roles.includes("ADMIN")); void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
+  return <main className="min-h-screen bg-[#f3f6f4] p-5 md:p-8"><div className="mx-auto max-w-4xl"><Link href={isAdmin ? "/admin" : "/employee"} className="mb-6 flex w-fit items-center gap-2 text-sm font-semibold text-[#176b5b]"><ArrowLeft size={16}/> Back to dashboard</Link><div className="mb-7"><p className="text-sm font-semibold text-[#176b5b]">MY EARNINGS</p><h1 className="mt-1 text-3xl font-bold">Wallet</h1><p className="mt-2 text-sm text-[#6d7975]">Credits from accepted work and payments made to you.</p></div>
+    <section className="mb-5 overflow-hidden rounded-2xl bg-[#12372f] p-7 text-white shadow-lg"><div className="flex items-start"><div><p className="text-xs font-bold tracking-wider text-white/50">AVAILABLE BALANCE</p><div className="mt-2 text-4xl font-bold">Rs. {Number(wallet?.balance ?? 0).toLocaleString()}</div><p className="mt-3 text-xs text-white/50">Updated from accepted task costs and recorded payments</p></div><div className="ml-auto grid h-12 w-12 place-items-center rounded-xl bg-white/10"><WalletCards size={24}/></div></div></section>
+    <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e5eae7] p-5 font-bold"><BriefcaseBusiness size={18} className="text-[#176b5b]"/> Recent transactions</div><div className="divide-y divide-[#e7ebe9]">{wallet?.transactions.map((transaction) => { const credit = Number(transaction.amount) >= 0; return <div key={transaction.id} className="flex items-start gap-3 p-5"><div className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${credit ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>{credit ? <ArrowDownLeft size={18}/> : <ArrowUpRight size={18}/>}</div><div className="min-w-0 flex-1"><div className="font-semibold">{transaction.description}</div><div className="mt-1 text-xs text-[#7b8782]">{new Date(transaction.createdAt).toLocaleString()}{transaction.project ? ` · ${transaction.project.code}` : ""}{transaction.reference ? ` · ${transaction.reference}` : ""}</div>{transaction.task && <div className="mt-1 text-xs text-[#53605c]">{transaction.task.title}{transaction.task.revisionCount ? ` · Revision ${String(transaction.task.revisionCount).padStart(2, "0")}` : ""}</div>}</div><div className="text-right"><div className={`font-bold ${credit ? "text-emerald-700" : "text-blue-700"}`}>{credit ? "+" : "−"} Rs. {Math.abs(Number(transaction.amount)).toLocaleString()}</div><div className="mt-1 text-[10px] font-bold text-[#7b8782]">{transaction.status}</div></div></div>; })}{!wallet?.transactions.length && <div className="p-10 text-center text-sm text-[#7b8782]">No transactions yet. Accepted task costs will appear here.</div>}</div></section>
+  </div></main>;
+}

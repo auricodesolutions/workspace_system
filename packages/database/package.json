@@ -1,0 +1,21 @@
+{
+  "name": "@aurilink/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed",
+    "db:clean": "tsx prisma/clean.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/adapter-mariadb": "^7.0.0",
+    "@prisma/client": "^7.0.0",
+    "bcryptjs": "latest",
+    "dotenv": "latest"
+  },
+  "devDependencies": { "@types/node": "latest", "prisma": "^7.0.0", "tsx": "latest", "typescript": "latest" }
+}

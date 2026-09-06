@@ -1,0 +1,70 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Clock3, ListTodo, LogOut, RefreshCw, WalletCards } from "lucide-react";
+import { authFetch, getSession, logout } from "@/lib/auth";
+import Link from "next/link";
+
+type Task = { id: string; title: string; description?: string; status: string; priority: string; dueDate: string | null; revisionCount: number; laborCost?: string; revisions?: { revisionNumber: number; note?: string }[]; project?: { name: string; code: string } };
+const statusLabels: Record<string, string> = { BACKLOG: "Backlog", TODO: "To do", IN_PROGRESS: "In progress", WAITING: "Waiting", REVIEW: "Review", REVISION: "Revision required", COMPLETED: "Awaiting acceptance", ACCEPTED: "Accepted", CANCELLED: "Cancelled" };
+const filterOptions = [["ALL", "All statuses"], ["OPEN", "Open"], ["TODO", "To do"], ["IN_PROGRESS", "In progress"], ["WAITING", "Waiting"], ["REVISION", "Revision"], ["COMPLETED", "Submitted"], ["ACCEPTED", "Accepted"]] as const;
+
+function TaskList({ items, onStatus }: { items: Task[]; onStatus: (id: string, status: string) => void }) {
+  return items.length ? <div className="divide-y divide-[#e8ecea]">{items.map((task) => <div key={task.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+    <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{task.title}</span>{task.revisionCount > 0 && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-bold text-orange-700">Revision {String(task.revisionCount).padStart(2, "0")}</span>}{task.status === "ACCEPTED" && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Rs. {Number(task.laborCost ?? 0).toLocaleString()} credited</span>}</div><div className="mt-1 text-xs text-[#78847f]">{task.project?.name ?? "General task"}{task.dueDate ? ` · Due ${new Date(task.dueDate).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>{task.status === "REVISION" && task.revisions?.[0]?.note && <div className="mt-2 rounded-lg bg-orange-50 p-2 text-xs font-medium text-orange-800">Revision note: {task.revisions[0].note}</div>}</div>
+    <span className={`w-fit rounded-md px-2 py-1 text-[10px] font-bold ${task.priority === "CRITICAL" ? "bg-red-50 text-red-700" : task.priority === "HIGH" ? "bg-orange-50 text-orange-700" : "bg-amber-50 text-amber-700"}`}>{task.priority}</span>
+    <select disabled={task.status === "ACCEPTED"} value={task.status} onChange={(event) => onStatus(task.id, event.target.value)} className="rounded-lg border border-[#dbe2df] bg-white px-3 py-2 text-xs font-semibold outline-none focus:border-[#176b5b] disabled:bg-[#f3f5f4]">{Object.entries(statusLabels).filter(([value]) => !["REVISION", "ACCEPTED"].includes(value) || value === task.status).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
+  </div>)}</div> : <div className="p-6 text-center text-sm text-[#84908b]">No tasks here.</div>;
+}
+
+export default function EmployeeDashboard() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [firstName, setFirstName] = useState("Employee");
+  const [dateLabel, setDateLabel] = useState("Today");
+  const [selectedMonth, setSelectedMonth] = useState(new Date(2000, 0, 1));
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [calendarReady, setCalendarReady] = useState(false);
+  const load = useCallback(async () => { const response = await authFetch("/tasks/my"); if (response.ok) setTasks(await response.json()); setLoading(false); }, []);
+  useEffect(() => { const current = getSession(); if (!current) return void window.location.replace("/login"); if (current.user.roles.includes("ADMIN")) return void window.location.replace("/admin"); const timer = window.setTimeout(() => { const now = new Date(); setFirstName(current.user.firstName); setDateLabel(now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })); setSelectedMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setCalendarReady(true); void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
+  async function updateStatus(id: string, status: string) { const response = await authFetch(`/tasks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }); if (response.ok) await load(); }
+  const view = useMemo(() => {
+    const now = new Date(); const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0); const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+    const monthStart = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1); const monthEnd = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0, 23, 59, 59, 999);
+    const isCurrentMonth = now.getFullYear() === selectedMonth.getFullYear() && now.getMonth() === selectedMonth.getMonth();
+    const monthTasks = tasks.filter((task) => task.dueDate ? new Date(task.dueDate) >= monthStart && new Date(task.dueDate) <= monthEnd : isCurrentMonth);
+    const visible = monthTasks.filter((task) => statusFilter === "ALL" || (statusFilter === "OPEN" ? !["COMPLETED", "ACCEPTED", "CANCELLED"].includes(task.status) : task.status === statusFilter));
+    return {
+      overdue: visible.filter((task) => !["COMPLETED", "ACCEPTED", "CANCELLED"].includes(task.status) && task.dueDate && new Date(task.dueDate) < todayStart),
+      today: visible.filter((task) => !["COMPLETED", "ACCEPTED", "CANCELLED"].includes(task.status) && task.dueDate && new Date(task.dueDate) >= todayStart && new Date(task.dueDate) <= todayEnd),
+      upcoming: visible.filter((task) => !["COMPLETED", "ACCEPTED", "CANCELLED"].includes(task.status) && task.dueDate && new Date(task.dueDate) > todayEnd),
+      noDate: visible.filter((task) => !task.dueDate && !["COMPLETED", "ACCEPTED", "CANCELLED"].includes(task.status)),
+      completed: visible.filter((task) => task.status === "COMPLETED"),
+      accepted: visible.filter((task) => task.status === "ACCEPTED"),
+      cancelled: visible.filter((task) => task.status === "CANCELLED"),
+      total: monthTasks.length,
+      openCount: monthTasks.filter((task) => !["COMPLETED", "ACCEPTED", "CANCELLED"].includes(task.status)).length,
+      completedCount: monthTasks.filter((task) => ["COMPLETED", "ACCEPTED"].includes(task.status)).length,
+    };
+  }, [tasks, selectedMonth, statusFilter]);
+  function moveMonth(offset: number) { setSelectedMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1)); }
+
+  return <main className="min-h-screen bg-[#f3f6f4]">
+    <header className="border-b border-[#dfe6e2] bg-[#12372f] text-white"><div className="mx-auto flex h-20 max-w-6xl items-center px-5"><div className="grid h-10 w-10 place-items-center rounded-xl bg-[#d8a64c] font-black text-[#12372f]">A</div><div className="ml-3"><div className="font-bold">My Work</div><div className="text-xs text-white/50">Aurilink Business Platform</div></div><nav className="ml-auto hidden items-center gap-2 sm:flex"><Link href="/calendar" className="rounded-lg px-3 py-2 text-xs font-semibold text-white/75 hover:bg-white/10">Calendar</Link><Link href="/todo" className="rounded-lg px-3 py-2 text-xs font-semibold text-white/75 hover:bg-white/10">Personal to-do</Link></nav><Link href="/wallet" aria-label="My wallet" className="ml-auto flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-xs sm:ml-2"><WalletCards size={15}/><span className="hidden sm:inline">Wallet</span></Link><button onClick={logout} className="ml-2 flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-xs"><LogOut size={15}/> <span className="hidden sm:inline">Sign out</span></button></div></header>
+    <div className="mx-auto max-w-6xl p-5 py-8">
+      <div className="mb-7 flex items-end justify-between"><div><div className="text-sm font-semibold text-[#17705e]">{dateLabel}</div><h1 className="mt-1 text-3xl font-bold">Hello, {firstName}.</h1><p className="mt-2 text-sm text-[#697671]">Here is your assigned work and daily plan.</p></div><button onClick={() => void load()} className="grid h-10 w-10 place-items-center rounded-xl border border-[#dce3e0] bg-white"><RefreshCw size={17}/></button></div>
+      <section className="card mb-5 p-4"><div className="flex flex-col gap-4 lg:flex-row lg:items-center"><div className="flex items-center gap-2"><button onClick={() => moveMonth(-1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#dbe2df] hover:bg-[#f5f7f6]" aria-label="Previous month"><ChevronLeft size={18}/></button><div className="min-w-40 text-center text-sm font-bold">{calendarReady ? selectedMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "Tasks by month"}</div><button onClick={() => moveMonth(1)} className="grid h-9 w-9 place-items-center rounded-lg border border-[#dbe2df] hover:bg-[#f5f7f6]" aria-label="Next month"><ChevronRight size={18}/></button></div><button onClick={() => { const now = new Date(); setSelectedMonth(new Date(now.getFullYear(), now.getMonth(), 1)); }} className="rounded-lg border border-[#dbe2df] px-3 py-2 text-xs font-bold">Current month</button><div className="flex flex-1 flex-wrap gap-2 lg:justify-end">{filterOptions.map(([value, label]) => <button key={value} onClick={() => setStatusFilter(value)} className={`rounded-full px-3 py-2 text-xs font-semibold transition ${statusFilter === value ? "bg-[#176b5b] text-white" : "bg-[#eef2f0] text-[#5d6965] hover:bg-[#e4ebe8]"}`}>{label}</button>)}</div></div></section>
+      <div className="mb-5 grid gap-4 sm:grid-cols-4"><div className="card p-5"><ListTodo className="text-[#176b5b]" size={20}/><div className="mt-4 text-2xl font-bold">{view.total}</div><div className="text-xs text-[#78847f]">All tasks this month</div></div><div className="card p-5"><Clock3 className="text-red-600" size={20}/><div className="mt-4 text-2xl font-bold">{view.overdue.length}</div><div className="text-xs text-[#78847f]">Overdue tasks</div></div><div className="card p-5"><CalendarDays className="text-[#176b5b]" size={20}/><div className="mt-4 text-2xl font-bold">{view.openCount}</div><div className="text-xs text-[#78847f]">Open tasks</div></div><div className="card p-5"><CheckCircle2 className="text-blue-600" size={20}/><div className="mt-4 text-2xl font-bold">{view.completedCount}</div><div className="text-xs text-[#78847f]">Completed</div></div></div>
+      {loading ? <div className="card p-10 text-center text-sm text-[#78847f]">Loading your tasks...</div> : <div className="space-y-5">
+        {view.overdue.length > 0 && <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e8ecea] px-5 py-4 font-bold text-red-700"><Clock3 size={17}/> Overdue <span className="ml-auto text-xs">{view.overdue.length}</span></div><TaskList items={view.overdue} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {view.today.length > 0 && <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e8ecea] px-5 py-4 font-bold"><CalendarDays size={17} className="text-[#176b5b]"/> Due today <span className="ml-auto text-xs">{view.today.length}</span></div><TaskList items={view.today} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {view.upcoming.length > 0 && <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e8ecea] px-5 py-4 font-bold"><ListTodo size={17} className="text-blue-600"/> Upcoming <span className="ml-auto text-xs">{view.upcoming.length}</span></div><TaskList items={view.upcoming} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {view.noDate.length > 0 && <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e8ecea] px-5 py-4 font-bold"><ListTodo size={17} className="text-[#7b8782]"/> No due date <span className="ml-auto text-xs">{view.noDate.length}</span></div><TaskList items={view.noDate} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {view.completed.length > 0 && <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e8ecea] px-5 py-4 font-bold text-emerald-700"><CheckCircle2 size={17}/> Completed <span className="ml-auto text-xs">{view.completed.length}</span></div><TaskList items={view.completed} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {view.accepted.length > 0 && <section className="card overflow-hidden"><div className="flex items-center gap-2 border-b border-[#e8ecea] px-5 py-4 font-bold text-emerald-700"><CheckCircle2 size={17}/> Accepted and credited <span className="ml-auto text-xs">{view.accepted.length}</span></div><TaskList items={view.accepted} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {view.cancelled.length > 0 && <section className="card overflow-hidden"><div className="border-b border-[#e8ecea] px-5 py-4 font-bold text-[#747f7b]">Cancelled</div><TaskList items={view.cancelled} onStatus={(id, status) => void updateStatus(id, status)}/></section>}
+        {!view.overdue.length && !view.today.length && !view.upcoming.length && !view.noDate.length && !view.completed.length && !view.accepted.length && !view.cancelled.length && <div className="card p-10 text-center"><ListTodo className="mx-auto text-[#a2aca8]"/><h2 className="mt-3 font-bold">No matching tasks</h2><p className="mt-1 text-sm text-[#7b8782]">Try another status or change the selected month.</p></div>}
+      </div>}
+    </div>
+  </main>;
+}

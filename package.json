@@ -1,0 +1,23 @@
+{
+  "name": "aurilink-business-platform",
+  "private": true,
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n WEB,API -c cyan,green \"npm run dev -w @aurilink/web\" \"npm run dev -w @aurilink/api\"",
+    "dev:web": "npm run dev -w @aurilink/web",
+    "dev:api": "npm run dev -w @aurilink/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+    ,"test:e2e": "playwright test"
+    ,"test:e2e:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "concurrently": "latest"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@aurilink/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aurilink/database": "0.1.0",
+    "@nestjs/common": "^12.0.0",
+    "@nestjs/core": "^12.0.0",
+    "@nestjs/jwt": "latest",
+    "@nestjs/platform-express": "^12.0.0",
+    "@nestjs/swagger": "latest",
+    "@prisma/adapter-mariadb": "^7.0.0",
+    "@types/pdfkit": "^0.17.6",
+    "bcryptjs": "latest",
+    "class-transformer": "latest",
+    "class-validator": "latest",
+    "dotenv": "latest",
+    "nodemailer": "^10.0.0",
+    "pdfkit": "^0.20.2",
+    "reflect-metadata": "latest",
+    "rxjs": "latest"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "latest",
+    "@types/nodemailer": "^8.0.1",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

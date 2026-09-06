@@ -1,0 +1,27 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: aurilink
+      MYSQL_USER: aurilink
+      MYSQL_PASSWORD: aurilink
+      MYSQL_ROOT_PASSWORD: change-this-root-password
+    ports:
+      - "3306:3306"
+    volumes:
+      - aurilink_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uaurilink", "-paurilink"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - aurilink_redis:/data
+
+volumes:
+  aurilink_mysql:
+  aurilink_redis:
