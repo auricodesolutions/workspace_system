@@ -13,6 +13,7 @@ class CreateTaskDto {
   @IsString() @MinLength(3) title!: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsString() projectId?: string;
+  @IsOptional() @IsString() taskTypeId?: string;
   @IsArray() @IsString({ each: true }) assigneeIds!: string[];
   @IsOptional() @IsISO8601() dueDate?: string;
   @IsIn(priorities) priority!: typeof priorities[number];
@@ -28,24 +29,38 @@ class TasksController {
 
   @Get("my")
   myTasks(@Req() request: AuthRequest) {
-    return this.prisma.task.findMany({ where: { assignments: { some: { userId: request.user.id } } }, include: { project: { select: { id: true, name: true, code: true } }, revisions: { orderBy: { revisionNumber: "desc" }, take: 1 } }, orderBy: [{ priorityScore: "desc" }, { dueDate: "asc" }] });
+    return this.prisma.task.findMany({ where: { assignments: { some: { userId: request.user.id } } }, include: { taskType: true, project: { select: { id: true, name: true, code: true, client: { select: { id: true, name: true } } } }, revisions: { orderBy: { revisionNumber: "desc" }, take: 1 } }, orderBy: [{ priorityScore: "desc" }, { dueDate: "asc" }] });
   }
 
   @Get() @Roles("ADMIN") @UseGuards(RolesGuard)
-  allTasks() {
-    return this.prisma.task.findMany({ include: { project: true, fundingAccount: { select: { id: true, name: true, type: true } }, revisions: { orderBy: { revisionNumber: "desc" }, take: 1 }, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } }, orderBy: { createdAt: "desc" } });
+  allTasks(@Req() request: AuthRequest) {
+    return this.prisma.task.findMany({ where: { createdBy: { organizationId: request.user.organizationId } }, include: { taskType: true, project: { include: { client: { select: { id: true, name: true } } } }, fundingAccount: { select: { id: true, name: true, type: true } }, revisions: { orderBy: { revisionNumber: "desc" }, take: 1 }, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } }, orderBy: { createdAt: "desc" } });
+  }
+
+  @Get("management") @Roles("ADMIN") @UseGuards(RolesGuard)
+  async management(@Req() request: AuthRequest) {
+    const organizationId = request.user.organizationId;
+    const [users, clients, projects, tasks, taskTypes] = await Promise.all([
+      this.prisma.user.findMany({ where: { organizationId }, select: { id: true, firstName: true, lastName: true, email: true, jobTitle: true, status: true }, orderBy: [{ firstName: "asc" }, { lastName: "asc" }] }),
+      this.prisma.client.findMany({ where: { organizationId }, select: { id: true, name: true, status: true, _count: { select: { projects: true } } }, orderBy: { name: "asc" } }),
+      this.prisma.project.findMany({ where: { businessUnit: { organizationId } }, include: { client: { select: { id: true, name: true } }, tasks: { include: { taskType: true, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } }, orderBy: { createdAt: "desc" } }, _count: { select: { tasks: true, invoices: true } } }, orderBy: { createdAt: "desc" } }),
+      this.prisma.task.findMany({ where: { createdBy: { organizationId } }, include: { taskType: true, project: { include: { client: { select: { id: true, name: true } } } }, fundingAccount: { select: { id: true, name: true } }, revisions: { orderBy: { revisionNumber: "desc" }, take: 1 }, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } } } }, orderBy: { createdAt: "desc" } }),
+      this.prisma.taskType.findMany({ where: { organizationId }, orderBy: [{ active: "desc" }, { name: "asc" }] }),
+    ]);
+    return { users, clients, projects, tasks, taskTypes };
   }
 
   @Post() @Roles("ADMIN") @UseGuards(RolesGuard)
-  create(@Req() request: AuthRequest, @Body() dto: CreateTaskDto) {
+  async create(@Req() request: AuthRequest, @Body() dto: CreateTaskDto) {
     const score = { LOW: 25, MEDIUM: 50, HIGH: 75, CRITICAL: 100 }[dto.priority];
-    return this.prisma.task.create({ data: { title: dto.title, description: dto.description, projectId: dto.projectId || undefined, createdById: request.user.id, priority: dto.priority, priorityScore: score, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, assignments: { create: dto.assigneeIds.map((userId) => ({ userId })) } }, include: { assignments: true } });
+    if (dto.taskTypeId) await this.prisma.taskType.findFirstOrThrow({ where: { id: dto.taskTypeId, organizationId: request.user.organizationId, active: true } });
+    return this.prisma.task.create({ data: { title: dto.title, description: dto.description, projectId: dto.projectId || undefined, taskTypeId: dto.taskTypeId || undefined, createdById: request.user.id, priority: dto.priority, priorityScore: score, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, assignments: { create: dto.assigneeIds.map((userId) => ({ userId })) } }, include: { taskType: true, assignments: true } });
   }
 
   @Patch(":id/status")
   async updateStatus(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: UpdateStatusDto) {
     const isAdmin = request.user.roles.includes("ADMIN");
-    const task = await this.prisma.task.findFirst({ where: { id, ...(isAdmin ? {} : { assignments: { some: { userId: request.user.id } } }) } });
+    const task = await this.prisma.task.findFirst({ where: { id, createdBy: { organizationId: request.user.organizationId }, ...(isAdmin ? {} : { assignments: { some: { userId: request.user.id } } }) } });
     if (!task) throw new NotFoundException("Task not found or not assigned to you");
     if (task.status === "ACCEPTED") throw new BadRequestException("An accepted task is final and cannot be changed");
     if (!isAdmin && task.status === "COMPLETED") throw new BadRequestException("This task is awaiting administrator review");
@@ -55,7 +70,7 @@ class TasksController {
   @Post(":id/revision") @Roles("ADMIN") @UseGuards(RolesGuard)
   async requestRevision(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: RevisionDto) {
     return this.prisma.$transaction(async (tx) => {
-      const task = await tx.task.findUniqueOrThrow({ where: { id } });
+      const task = await tx.task.findFirstOrThrow({ where: { id, createdBy: { organizationId: request.user.organizationId } } });
       if (task.status !== "COMPLETED") throw new BadRequestException("Only a completed task can be reopened for revision");
       const revisionNumber = task.revisionCount + 1;
       await tx.taskRevision.create({ data: { taskId: id, requestedById: request.user.id, revisionNumber, note: dto.note } });
@@ -67,7 +82,7 @@ class TasksController {
   @Post(":id/accept") @Roles("ADMIN") @UseGuards(RolesGuard)
   async accept(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: AcceptTaskDto) {
     return this.prisma.$transaction(async (tx) => {
-      const task = await tx.task.findUniqueOrThrow({ where: { id }, include: { assignments: true, project: { select: { clientId: true } } } });
+      const task = await tx.task.findFirstOrThrow({ where: { id, createdBy: { organizationId: request.user.organizationId } }, include: { assignments: true } });
       if (task.status !== "COMPLETED") throw new BadRequestException("Only a completed task can be accepted");
       if (!task.assignments.some((assignment) => assignment.userId === dto.userId)) throw new BadRequestException("Wallet recipient must be assigned to this task");
       await tx.financialAccount.findFirstOrThrow({ where: { id: dto.fundingAccountId, organizationId: request.user.organizationId, active: true } });
@@ -75,11 +90,6 @@ class TasksController {
       const updatedWallet = await tx.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: dto.cost } } });
       await tx.walletTransaction.create({ data: { walletId: wallet.id, taskId: task.id, projectId: task.projectId, type: "TASK_CREDIT", status: "CREDITED", amount: dto.cost, balanceAfter: updatedWallet.balance, description: `Accepted task: ${task.title}` } });
       if (task.projectId) await tx.project.update({ where: { id: task.projectId }, data: { taskCostTotal: { increment: dto.cost } } });
-      if (task.project?.clientId) {
-        const account = await tx.clientAccount.upsert({ where: { clientId: task.project.clientId }, update: {}, create: { clientId: task.project.clientId } });
-        const updatedAccount = await tx.clientAccount.update({ where: { id: account.id }, data: { balance: { increment: dto.cost } } });
-        await tx.clientTransaction.create({ data: { accountId: account.id, taskId: task.id, projectId: task.projectId, type: "TASK_CHARGE", status: "CHARGED", amount: dto.cost, balanceAfter: updatedAccount.balance, description: `Approved task: ${task.title}` } });
-      }
       await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "ACCEPT", entityType: "TASK", entityId: id, summary: `Accepted ${task.title} at LKR ${dto.cost}`, metadata: { cost: dto.cost, recipientId: dto.userId } } });
       return tx.task.update({ where: { id }, data: { status: "ACCEPTED", acceptedAt: new Date(), acceptedById: request.user.id, laborCost: dto.cost, fundingAccountId: dto.fundingAccountId } });
     });
@@ -93,7 +103,7 @@ class DirectoryController {
   @Get("users/assignable")
   users(@Req() request: AuthRequest) { return this.prisma.user.findMany({ where: { organizationId: request.user.organizationId, status: "ACTIVE" }, select: { id: true, firstName: true, lastName: true, email: true, jobTitle: true } }); }
   @Get("projects/options")
-  projects() { return this.prisma.project.findMany({ where: { status: { in: ["PLANNING", "ACTIVE", "AT_RISK"] } }, select: { id: true, name: true, code: true }, orderBy: { name: "asc" } }); }
+  projects(@Req() request: AuthRequest) { return this.prisma.project.findMany({ where: { businessUnit: { organizationId: request.user.organizationId }, status: { in: ["PLANNING", "ACTIVE", "AT_RISK"] } }, select: { id: true, name: true, code: true, client: { select: { id: true, name: true } } }, orderBy: { name: "asc" } }); }
 }
 
 @Module({ controllers: [TasksController, DirectoryController], providers: [JwtAuthGuard, RolesGuard] })

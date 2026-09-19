@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Inject, Module, Param, Patch, Post, Req, Res, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { IsArray, IsISO8601, IsIn, IsNumber, IsOptional, IsString, Min, MinLength } from "class-validator";
+import { IsArray, IsISO8601, IsIn, IsNumber, IsOptional, IsString, Min } from "class-validator";
 import PDFDocument from "pdfkit";
 import type { Response } from "express";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,7 @@ class CreateInvoiceDto {
   @IsOptional() @IsString() notes?: string;
 }
 class InvoiceStatusDto { @IsIn(invoiceStatuses) status!: typeof invoiceStatuses[number]; }
-class InvoicePaymentDto { @IsNumber() @Min(0.01) amount!: number; @IsISO8601() paidAt!: string; @IsOptional() @IsString() method?: string; @IsOptional() @IsString() reference?: string; }
+class InvoicePaymentDto { @IsNumber() @Min(0.01) amount!: number; @IsISO8601() paidAt!: string; @IsString() financialAccountId!: string; @IsOptional() @IsString() method?: string; @IsOptional() @IsString() reference?: string; }
 
 @ApiTags("invoices") @ApiBearerAuth() @UseGuards(JwtAuthGuard, RolesGuard) @Roles("ADMIN")
 @Controller("invoices")
@@ -45,9 +45,11 @@ class InvoicesController {
     const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0); const itemDiscount = items.reduce((sum, item) => sum + item.discount, 0); const invoiceDiscount = dto.discount ?? 0; const discount = itemDiscount + invoiceDiscount; if (discount > subtotal) throw new BadRequestException("Total discount cannot exceed subtotal");
     const tax = dto.tax ?? 0; const total = subtotal - discount + tax;
     if (dto.paymentAccountId) await this.prisma.financialAccount.findFirstOrThrow({ where: { id: dto.paymentAccountId, organizationId: request.user.organizationId } });
-    const invoice = await this.prisma.invoice.create({ data: { organizationId: request.user.organizationId, businessUnitId: client.businessUnitId, clientId: client.id, projectId: dto.projectId || undefined, paymentAccountId: dto.paymentAccountId || undefined, invoiceNumber, issueDate: new Date(dto.issueDate), dueDate: new Date(dto.dueDate), subtotal, discount, tax, total, notes: dto.notes, status: "DRAFT", items: { create: items } }, include: { client: true, project: true, paymentAccount: true, items: true, payments: true } });
-    await this.prisma.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "CREATE", entityType: "INVOICE", entityId: invoice.id, summary: `Created invoice ${invoice.invoiceNumber} for ${client.name}`, metadata: { total } } });
-    return invoice;
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.create({ data: { organizationId: request.user.organizationId, businessUnitId: client.businessUnitId, clientId: client.id, projectId: dto.projectId || undefined, paymentAccountId: dto.paymentAccountId || undefined, invoiceNumber, issueDate: new Date(dto.issueDate), dueDate: new Date(dto.dueDate), subtotal, discount, tax, total, notes: dto.notes, status: "DRAFT", items: { create: items } }, include: { client: true, project: true, paymentAccount: true, items: true, payments: true } });
+      await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "CREATE", entityType: "INVOICE", entityId: invoice.id, summary: `Saved draft invoice ${invoice.invoiceNumber} for ${client.name}`, metadata: { total } } });
+      return invoice;
+    });
   }
 
   @Get(":id/pdf")
@@ -56,7 +58,7 @@ class InvoicesController {
     const paid = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0); const due = Math.max(0, Number(invoice.total) - paid); const discountValue = Number(invoice.discount); const totalDiscount = discountValue === 0 ? 0 : Math.abs(discountValue);
     response.setHeader("Content-Type", "application/pdf"); response.setHeader("Content-Disposition", `attachment; filename="${invoice.invoiceNumber}.pdf"`);
     const doc = new PDFDocument({ size: "LETTER", margin: 36, info: { Title: `Invoice ${invoice.invoiceNumber}`, Author: "Aurilink Digital" } }); doc.pipe(response);
-    const blue = "#0d477f", cyan = "#08b7d5", ink = "#182231", gray = "#657080"; const right = 576;
+    const blue = "#0d477f", cyan = "#08b7d5", ink = "#182231", gray = "#657080";
     try { doc.image(fileURLToPath(new URL("../../../assets/aurilink-logo.jpeg", import.meta.url)), 36, 35, { fit: [95, 95] }); } catch { doc.fontSize(18).fillColor(blue).text("AURILINK DIGITAL", 36, 60); }
     doc.rect(135, 35, 441, 26).fill(cyan); doc.fillColor(gray).fontSize(10).text("Invoice Date", 285, 82).fillColor(ink).text(invoice.issueDate.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }), 365, 82);
     doc.fillColor(gray).text("Status", 285, 99).fillColor(ink).text(invoice.status.replaceAll("_", " "), 365, 99); doc.fillColor(gray).text("Currency", 285, 116).fillColor(ink).text(invoice.businessUnit.currency, 365, 116);
@@ -71,24 +73,55 @@ class InvoicesController {
 
   @Patch(":id/status")
   async status(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: InvoiceStatusDto) {
-    const current = await this.prisma.invoice.findFirstOrThrow({ where: { id, organizationId: request.user.organizationId } });
-    if (current.status === "PAID" && dto.status !== "PAID") throw new BadRequestException("A paid invoice cannot be reopened");
-    const invoice = await this.prisma.invoice.update({ where: { id }, data: { status: dto.status } });
-    await this.prisma.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "STATUS_CHANGE", entityType: "INVOICE", entityId: id, summary: `Changed ${invoice.invoiceNumber} status to ${dto.status}` } });
-    return invoice;
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.invoice.findFirstOrThrow({ where: { id, organizationId: request.user.organizationId }, include: { payments: true } });
+      if (current.status === "PAID" && dto.status !== "PAID") throw new BadRequestException("A paid invoice cannot be reopened");
+      if (current.status === "VOID" && dto.status !== "VOID") throw new BadRequestException("A void invoice cannot be reopened");
+      if (current.status === "DRAFT" && !["DRAFT", "SENT", "VOID"].includes(dto.status)) throw new BadRequestException("Issue the draft invoice before recording another status");
+      if (current.status !== "DRAFT" && dto.status === "DRAFT") throw new BadRequestException("An issued invoice cannot be returned to draft");
+      if (current.status === "DRAFT" && dto.status === "SENT") {
+        const existingCharge = await tx.clientTransaction.findFirst({ where: { invoiceChargeKey: current.id } });
+        if (!existingCharge) {
+          const account = await tx.clientAccount.upsert({ where: { clientId: current.clientId }, update: {}, create: { clientId: current.clientId } });
+          const updatedAccount = await tx.clientAccount.update({ where: { id: account.id }, data: { balance: { increment: current.total } } });
+          await tx.clientTransaction.create({ data: { accountId: account.id, invoiceId: current.id, invoiceChargeKey: current.id, projectId: current.projectId, type: "INVOICE_CHARGE", status: "CHARGED", amount: current.total, balanceAfter: updatedAccount.balance, description: `Issued invoice ${current.invoiceNumber}` } });
+        }
+      }
+      if (dto.status === "VOID" && current.status !== "VOID") {
+        const paid = current.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+        const remaining = Math.max(0, Number(current.total) - paid);
+        const account = await tx.clientAccount.upsert({ where: { clientId: current.clientId }, update: {}, create: { clientId: current.clientId } });
+        const reversal = Math.min(remaining, Number(account.balance));
+        if (reversal > 0) {
+          const updatedAccount = await tx.clientAccount.update({ where: { id: account.id }, data: { balance: { decrement: reversal } } });
+          await tx.clientTransaction.create({ data: { accountId: account.id, invoiceId: current.id, projectId: current.projectId, type: "ADJUSTMENT", status: "REVERSED", amount: -reversal, balanceAfter: updatedAccount.balance, description: `Voided invoice ${current.invoiceNumber}` } });
+        }
+        await tx.clientTransaction.updateMany({ where: { invoiceChargeKey: current.id }, data: { status: "REVERSED" } });
+      }
+      const invoice = await tx.invoice.update({ where: { id }, data: { status: dto.status } });
+      await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "STATUS_CHANGE", entityType: "INVOICE", entityId: id, summary: `Changed ${invoice.invoiceNumber} status to ${dto.status}` } });
+      return invoice;
+    });
   }
 
   @Post(":id/payments")
   async payment(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: InvoicePaymentDto) {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.findFirstOrThrow({ where: { id, organizationId: request.user.organizationId }, include: { payments: true } });
-      if (invoice.status === "VOID") throw new BadRequestException("Payments cannot be added to a void invoice");
+      if (["DRAFT", "VOID"].includes(invoice.status)) throw new BadRequestException("Only an issued invoice can receive payments");
+      const receivingAccount = await tx.financialAccount.findFirstOrThrow({ where: { id: dto.financialAccountId, organizationId: request.user.organizationId, active: true } });
       const paid = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
       if (paid + dto.amount > Number(invoice.total)) throw new BadRequestException("Payment cannot exceed the invoice balance");
-      const payment = await tx.payment.create({ data: { invoiceId: id, amount: dto.amount, paidAt: new Date(dto.paidAt), method: dto.method, reference: dto.reference } });
+      const payment = await tx.payment.create({ data: { invoiceId: id, financialAccountId: receivingAccount.id, amount: dto.amount, paidAt: new Date(dto.paidAt), method: dto.method, reference: dto.reference } });
       const newPaid = paid + dto.amount; const status = newPaid >= Number(invoice.total) ? "PAID" : "PARTIALLY_PAID";
+      const account = await tx.clientAccount.upsert({ where: { clientId: invoice.clientId }, update: {}, create: { clientId: invoice.clientId } });
+      if (Number(account.balance) < dto.amount) throw new BadRequestException("Payment exceeds the client's current outstanding balance");
+      const updatedAccount = await tx.clientAccount.update({ where: { id: account.id }, data: { balance: { decrement: dto.amount } } });
+      await tx.clientTransaction.create({ data: { accountId: account.id, invoiceId: invoice.id, projectId: invoice.projectId, type: "PAYMENT", status: "PAID", amount: -dto.amount, balanceAfter: updatedAccount.balance, description: `Payment for invoice ${invoice.invoiceNumber}`, reference: dto.reference } });
+      const updatedFinancialAccount = await tx.financialAccount.update({ where: { id: receivingAccount.id }, data: { balance: { increment: dto.amount } } });
+      await tx.accountTransaction.create({ data: { financialAccountId: receivingAccount.id, paymentId: payment.id, type: "CLIENT_PAYMENT", amount: dto.amount, balanceAfter: updatedFinancialAccount.balance, description: `Payment received for ${invoice.invoiceNumber}`, reference: dto.reference } });
       await tx.invoice.update({ where: { id }, data: { status } });
-      await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "PAYMENT", entityType: "INVOICE", entityId: id, summary: `Recorded LKR ${dto.amount} against ${invoice.invoiceNumber}`, metadata: { amount: dto.amount, reference: dto.reference } } });
+      await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "PAYMENT", entityType: "INVOICE", entityId: id, summary: `Recorded LKR ${dto.amount} against ${invoice.invoiceNumber} into ${receivingAccount.name}`, metadata: { amount: dto.amount, reference: dto.reference, financialAccountId: receivingAccount.id } } });
       return payment;
     });
   }

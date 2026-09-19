@@ -9,11 +9,12 @@ async function main(){
  const admin=await prisma.user.findUnique({where:{email},include:{roles:{include:{role:true}}}});
  if(!admin||admin.status!=="ACTIVE"||!admin.roles.some(item=>item.role.name==="ADMIN"))throw new Error(`Refusing to clean: ${email} is not an active administrator`);
  await prisma.$transaction(async tx=>{
-  await tx.renewalReminder.deleteMany(); await tx.clientTransaction.deleteMany(); await tx.projectRenewal.deleteMany();
+ await tx.renewalReminder.deleteMany(); await tx.clientTransaction.deleteMany(); await tx.projectRenewal.deleteMany();
+  await tx.meetingItem.deleteMany(); await tx.meetingParticipant.deleteMany(); await tx.weeklyMeeting.deleteMany();
   await tx.assetEvent.deleteMany(); await tx.asset.deleteMany(); await tx.accountTransaction.deleteMany();
   await tx.walletTransaction.deleteMany(); await tx.wallet.deleteMany();
   await tx.payment.deleteMany(); await tx.quotationItem.deleteMany(); await tx.quotation.deleteMany(); await tx.invoiceItem.deleteMany(); await tx.invoice.deleteMany();
-  await tx.taskRevision.deleteMany(); await tx.taskAssignment.deleteMany(); await tx.personalTodo.deleteMany(); await tx.task.deleteMany(); await tx.approval.deleteMany();
+  await tx.taskRevision.deleteMany(); await tx.taskAssignment.deleteMany(); await tx.personalTodo.deleteMany(); await tx.task.deleteMany(); await tx.taskType.deleteMany(); await tx.approval.deleteMany();
   await tx.project.deleteMany(); await tx.clientAccount.deleteMany(); await tx.client.deleteMany(); await tx.financialAccount.deleteMany();
   await tx.auditLog.deleteMany(); await tx.passwordResetToken.deleteMany();
   await tx.businessUnitMember.deleteMany({where:{userId:{not:admin.id}}}); await tx.userRole.deleteMany({where:{userId:{not:admin.id}}}); await tx.user.deleteMany({where:{id:{not:admin.id}}});

@@ -19,6 +19,8 @@ import { RenewalsModule } from "./modules/renewals/renewals.module.js";
 import { AssetsModule } from "./modules/assets/assets.module.js";
 import { SalesModule } from "./modules/sales/sales.module.js";
 import { SettingsModule } from "./modules/settings/settings.module.js";
+import { MeetingsModule } from "./modules/meetings/meetings.module.js";
+import { TaskTypesModule } from "./modules/task-types/task-types.module.js";
 
-@Module({ imports: [DatabaseModule, AuthModule, HealthModule, DashboardModule, TasksModule, ProjectsModule, PlannerModule, UsersModule, WalletsModule, ClientsModule, InvoicesModule, AuditModule, AccountsModule, ReportsModule, QuotationsModule, RenewalsModule, AssetsModule, SalesModule, SettingsModule], providers: [PrismaService], exports: [PrismaService] })
+@Module({ imports: [DatabaseModule, AuthModule, HealthModule, DashboardModule, TasksModule, ProjectsModule, PlannerModule, UsersModule, WalletsModule, ClientsModule, InvoicesModule, AuditModule, AccountsModule, ReportsModule, QuotationsModule, RenewalsModule, AssetsModule, SalesModule, SettingsModule, MeetingsModule, TaskTypesModule], providers: [PrismaService], exports: [PrismaService] })
 export class AppModule {}

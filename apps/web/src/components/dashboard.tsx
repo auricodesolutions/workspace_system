@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   AlertTriangle, ArrowRight, Bell, CalendarDays, CheckCircle2, ChevronRight,
-  CircleDollarSign, Clock3, FileText, FolderKanban, LogOut, Menu, Plus, Search, UsersRound,
+  CircleDollarSign, Clock3, FolderKanban, LogOut, Menu, Plus, Search, UsersRound,
 } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { authFetch, getSession, logout } from "@/lib/auth";
@@ -16,18 +16,12 @@ const attentions = [
   { icon: AlertTriangle, color: "#d17127", bg: "#fff5e9", title: "2 projects at risk", detail: "Deadlines within 7 days", action: "View projects" },
 ];
 
-const tasks = [
-  { title: "Review homepage design — ABC Hotel", meta: "Website Redesign · Due 10:30 AM", priority: "HIGH", tone: "#df7b24" },
-  { title: "Send September invoice — XYZ Foods", meta: "Finance · Due 12:00 PM", priority: "CRITICAL", tone: "#d94747" },
-  { title: "Approve campaign content calendar", meta: "September Campaign · Due 2:00 PM", priority: "MEDIUM", tone: "#c49923" },
-  { title: "Weekly project review", meta: "Internal · Due 4:00 PM", priority: "LOW", tone: "#34886f" },
-];
-
 type DashboardSummary = {
   attention: { overdueTasks?: number; overdueInvoices?: number; pendingApprovals?: number; pendingAcceptance?: number; atRiskProjects?: number };
   metrics: { activeProjects?: number; tasksToday?: number; activeUsers?: number; outstandingLkr?: number; overdueLkr?: number; employeePayableLkr?: number; clientReceivableLkr?: number; accountBalanceLkr?: number };
   tasks?: { id: string; title: string; project: string; priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; dueDate: string | null }[];
   renewals?: { id: string; name: string; project: string; client: string; amount: number; dueDate: string; daysBefore: number }[];
+  team?: { id: string; name: string; jobTitle: string; openTasks: number; overdueTasks: number }[];
 };
 
 const formatLkr = (value = 0) => value >= 1000 ? `Rs. ${(value / 1000).toFixed(value % 1000 ? 1 : 0)}K` : `Rs. ${value.toLocaleString()}`;
@@ -49,6 +43,7 @@ export function Dashboard() {
   const [firstName, setFirstName] = useState("Admin");
   const [sidebarUser, setSidebarUser] = useState<{ firstName: string; lastName: string; jobTitle?: string }>();
   const [dateLabels, setDateLabels] = useState({ short: "Today", long: "Today" });
+  const [search, setSearch] = useState("");
   useEffect(() => {
     const session = getSession();
     if (!session) { window.location.replace("/login"); return; }
@@ -76,20 +71,20 @@ export function Dashboard() {
     meta: `${task.project} · ${task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "No due date"}`,
     priority: task.priority,
     tone: { LOW: "#34886f", MEDIUM: "#c49923", HIGH: "#df7b24", CRITICAL: "#d94747" }[task.priority],
-  })) ?? tasks;
+  })) ?? [];
   return <div className="min-h-screen">
     <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} user={sidebarUser} inboxCount={summary?.attention.pendingAcceptance ?? 0} />
     {menuOpen && <button aria-label="Close menu" className="fixed inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setMenuOpen(false)}/>} 
     <main className="lg:pl-[268px]">
       <header className="sticky top-0 z-10 flex h-[76px] items-center border-b border-[#e2e7e4] bg-white/95 px-5 backdrop-blur md:px-8">
         <button className="mr-3 lg:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={22}/></button>
-        <div className="relative hidden w-full max-w-[360px] sm:block">
+        <form onSubmit={(event) => { event.preventDefault(); const value = search.trim(); router.push(value ? `/admin/work-management?search=${encodeURIComponent(value)}` : "/admin/work-management"); }} className="relative hidden w-full max-w-[360px] sm:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8a9692]" size={17}/>
-          <input className="w-full rounded-xl border border-[#e0e5e2] bg-[#f8faf9] py-2.5 pl-10 pr-4 text-sm outline-none focus:border-[#277665]" placeholder="Search clients, projects, tasks..." />
-        </div>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search work" className="w-full rounded-xl border border-[#e0e5e2] bg-[#f8faf9] py-2.5 pl-10 pr-4 text-sm outline-none focus:border-[#277665]" placeholder="Search clients, projects, tasks..." />
+        </form>
         <div className="ml-auto flex items-center gap-3">
           <div className="hidden items-center gap-2 rounded-lg border border-[#e2e6e4] px-3 py-2 text-xs font-medium text-[#596661] md:flex"><CalendarDays size={15}/> {dateLabels.short}</div>
-          <button className="relative grid h-10 w-10 place-items-center rounded-xl border border-[#e2e6e4]"><Bell size={18}/><span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#d94e4e] ring-2 ring-white"/></button>
+          <button onClick={() => router.push("/admin/work-management")} aria-label="Open work requiring attention" className="relative grid h-10 w-10 place-items-center rounded-xl border border-[#e2e6e4]"><Bell size={18}/>{(summary?.attention.pendingAcceptance ?? 0) > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#d94e4e] ring-2 ring-white"/>}</button>
           <button onClick={logout} className="grid h-10 w-10 place-items-center rounded-xl border border-[#e2e6e4] text-[#65716d]" title="Sign out"><LogOut size={17}/></button>
           <button onClick={() => router.push("/admin/tasks")} className="flex items-center gap-2 rounded-xl bg-[#176b5b] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#125a4d]"><Plus size={17}/> <span className="hidden sm:inline">Quick add</span></button>
         </div>
@@ -125,23 +120,19 @@ export function Dashboard() {
             <div className="flex items-center justify-between border-b border-[#ecefed] px-5 py-4"><div><h2 className="font-bold">My work today</h2><p className="mt-1 text-xs text-[#7a8681]">Priority assignments</p></div><button onClick={() => router.push("/admin/tasks")} className="text-xs font-semibold text-[#176b5b]">Open tasks</button></div>
             <div className="h-1 bg-[#edf0ee]"><div className="h-full w-1/2 bg-[#2a806d]"/></div>
             <div className="divide-y divide-[#edf0ee]">
-              {liveTasks.map((task) => <div key={task.title} className="flex items-center gap-3 px-5 py-4">
-                <button aria-label={`Complete ${task.title}`} className="h-5 w-5 shrink-0 rounded-full border-2 border-[#cbd3d0] hover:border-[#287766]"/>
+              {liveTasks.map((task) => <button type="button" onClick={() => router.push(`/admin/work-management?search=${encodeURIComponent(task.title)}`)} key={task.title} className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-[#fafbfa]">
+                <span className="h-5 w-5 shrink-0 rounded-full border-2 border-[#cbd3d0]"/>
                 <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{task.title}</div><div className="mt-1 text-xs text-[#7a8681]">{task.meta}</div></div>
                 <span className="hidden rounded-md px-2 py-1 text-[9px] font-bold tracking-wider sm:block" style={{ color: task.tone, backgroundColor: `${task.tone}13` }}>{task.priority}</span>
-              </div>)}
+              </button>)}
+              {!liveTasks.length && <div className="px-5 py-10 text-center text-sm text-[#7a8681]">No priority work is due today.</div>}
             </div>
             <button onClick={() => router.push("/admin/tasks")} className="flex w-full items-center justify-center gap-2 border-t border-[#edf0ee] py-3.5 text-xs font-semibold text-[#176b5b]"><Plus size={15}/> Assign a task</button>
           </section>
 
           <section className="card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-[#ecefed] px-5 py-4"><div><h2 className="font-bold">Team workload</h2><p className="mt-1 text-xs text-[#7a8681]">This week&apos;s capacity</p></div><button onClick={() => router.push("/admin/modules/team")} className="text-xs font-semibold text-[#176b5b]">View team</button></div>
-            <div className="space-y-5 p-5">
-              {[['Kasun Perera','Developer',80,'32 / 40h','#287766'],['Nimali Silva','Designer',120,'48 / 40h','#d14e48'],['Ruwan Jay','Marketing',60,'24 / 40h','#3976a8'],['Amaya Fernando','Account Manager',92,'37 / 40h','#d17b29']].map(([name, role, percent, hours, color]) => <div key={name as string}>
-                <div className="mb-2 flex items-center"><div className="mr-3 grid h-8 w-8 place-items-center rounded-full bg-[#e8efec] text-[10px] font-bold text-[#286656]">{(name as string).split(' ').map(x => x[0]).join('')}</div><div><div className="text-xs font-bold">{name as string}</div><div className="text-[10px] text-[#87928e]">{role as string}</div></div><div className="ml-auto text-xs font-semibold" style={{color: color as string}}>{hours as string}</div></div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-[#edf0ee]"><div className="h-full rounded-full" style={{ width: `${Math.min(percent as number,100)}%`, backgroundColor: color as string }}/></div>
-              </div>)}
-            </div>
+            <div className="flex items-center justify-between border-b border-[#ecefed] px-5 py-4"><div><h2 className="font-bold">Team workload</h2><p className="mt-1 text-xs text-[#7a8681]">Open and overdue assignments</p></div><button onClick={() => router.push("/admin/work-management")} className="text-xs font-semibold text-[#176b5b]">View team</button></div>
+            <div className="space-y-4 p-5">{summary?.team?.map((member) => <button key={member.id} onClick={() => router.push(`/admin/work-management?userId=${member.id}`)} className="flex w-full items-center rounded-xl border border-[#edf0ee] p-3 text-left hover:bg-[#f8faf9]"><div className="mr-3 grid h-9 w-9 place-items-center rounded-full bg-[#e8efec] text-[10px] font-bold text-[#286656]">{member.name.split(" ").map((part) => part[0]).join("").slice(0,2)}</div><div><div className="text-xs font-bold">{member.name}</div><div className="text-[10px] text-[#87928e]">{member.jobTitle}</div></div><div className="ml-auto text-right"><div className="text-xs font-bold">{member.openTasks} open</div><div className={`text-[10px] ${member.overdueTasks ? "text-red-600" : "text-[#87928e]"}`}>{member.overdueTasks} overdue</div></div></button>)}{!summary?.team?.length && <div className="py-8 text-center text-sm text-[#7a8681]">No active team members.</div>}</div>
           </section>
         </div>
       </div>

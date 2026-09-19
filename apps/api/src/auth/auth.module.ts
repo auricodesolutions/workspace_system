@@ -1,11 +1,12 @@
 import dotenv from "dotenv";
-import { BadRequestException, Body, Controller, Get, Inject, Logger, Module, Post, Req, UnauthorizedException, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Logger, Module, Post, Req, Res, UnauthorizedException, UseGuards } from "@nestjs/common";
 import { JwtModule, JwtService } from "@nestjs/jwt";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { IsEmail, IsString, MinLength } from "class-validator";
 import { compare, hash } from "bcryptjs";
 import { createHash, randomBytes } from "node:crypto";
 import nodemailer from "nodemailer";
+import type { Response } from "express";
 import { PrismaService } from "../database/prisma.service.js";
 import { JwtAuthGuard } from "./jwt-auth.guard.js";
 import type { AuthRequest } from "./auth.types.js";
@@ -26,12 +27,20 @@ class AuthController {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService, @Inject(JwtService) private readonly jwt: JwtService) {}
 
   @Post("login")
-  async login(@Body() dto: LoginDto) {
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email.toLowerCase() }, include: { roles: { include: { role: true } } } });
     if (!user || user.status !== "ACTIVE" || !(await compare(dto.password, user.passwordHash))) throw new UnauthorizedException("Email or password is incorrect");
     const roles = user.roles.map(({ role }) => role.name);
     const profile = { id: user.id, organizationId: user.organizationId, email: user.email, firstName: user.firstName, lastName: user.lastName, jobTitle: user.jobTitle, roles };
-    return { accessToken: await this.jwt.signAsync(profile), user: profile, redirectTo: roles.includes("ADMIN") ? "/admin" : "/employee" };
+    const accessToken = await this.jwt.signAsync(profile);
+    response.cookie("aurilink_session", accessToken, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 8 * 60 * 60 * 1000 });
+    return { accessToken, user: profile, redirectTo: roles.includes("ADMIN") ? "/admin" : "/employee" };
+  }
+
+  @Post("logout")
+  logout(@Res({ passthrough: true }) response: Response) {
+    response.clearCookie("aurilink_session", { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/" });
+    return { message: "Signed out" };
   }
 
   @Get("me") @UseGuards(JwtAuthGuard) @ApiBearerAuth()

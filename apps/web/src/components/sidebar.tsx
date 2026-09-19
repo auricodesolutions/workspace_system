@@ -2,28 +2,36 @@
 
 import {
   BarChart3, BriefcaseBusiness, Building2, CalendarDays, ChevronDown,
-  CircleDollarSign, ContactRound, FolderKanban, LayoutDashboard, ListTodo,
+  CircleDollarSign, ClipboardList, ContactRound, FolderKanban, LayoutDashboard, ListTodo,
   FileText, KeyRound, Package, ScrollText, Settings, UsersRound, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 type NavIcon = typeof LayoutDashboard;
-type NavItem = { label: string; icon: NavIcon; href: string; active?: boolean };
+type NavItem = { label: string; icon: NavIcon; href: string };
 
 const groups: { label: string; items: NavItem[] }[] = [
   { label: "WORKSPACE", items: [
-    { label: "Command Center", icon: LayoutDashboard, href: "/admin", active: true }, { label: "Calendar", icon: CalendarDays, href: "/calendar" }, { label: "Personal To-do", icon: ListTodo, href: "/todo" }, { label: "My Wallet", icon: CircleDollarSign, href: "/wallet" }, { label: "Inbox", icon: ListTodo, href: "/admin/tasks" },
+    { label: "Dashboard", icon: LayoutDashboard, href: "/admin" }, { label: "My Tasks", icon: ClipboardList, href: "/admin/my-tasks" }, { label: "Calendar", icon: CalendarDays, href: "/calendar" }, { label: "Personal To-do", icon: ListTodo, href: "/todo" }, { label: "My Wallet", icon: CircleDollarSign, href: "/wallet" },
   ]},
-  { label: "OPERATIONS", items: [
-    { label: "CRM & Clients", icon: ContactRound, href: "/admin/clients" }, { label: "Projects", icon: FolderKanban, href: "/admin/modules/projects" }, { label: "Renewals", icon: CalendarDays, href: "/admin/renewals" }, { label: "Tasks", icon: ListTodo, href: "/admin/tasks" }, { label: "Manage Users", icon: UsersRound, href: "/admin/users" },
+  { label: "WORK", items: [
+    { label: "All Work", icon: BriefcaseBusiness, href: "/admin/work-management" }, { label: "Weekly Meetings", icon: CalendarDays, href: "/meetings" }, { label: "Task Types", icon: ListTodo, href: "/admin/task-types" },
   ]},
-  { label: "BUSINESS", items: [
-    { label: "Sales", icon: BriefcaseBusiness, href: "/admin/sales" }, { label: "Quotations", icon: FileText, href: "/admin/quotations" }, { label: "Invoices", icon: FileText, href: "/admin/invoices" }, { label: "Bank & Cash", icon: CircleDollarSign, href: "/admin/accounts" }, { label: "Team Wallets", icon: CircleDollarSign, href: "/admin/wallets" }, { label: "Audit Log", icon: ScrollText, href: "/admin/audit" }, { label: "Assets", icon: Package, href: "/admin/assets" }, { label: "Reports", icon: BarChart3, href: "/admin/reports" },
+  { label: "CUSTOMERS", items: [
+    { label: "Clients", icon: ContactRound, href: "/admin/clients" }, { label: "Projects", icon: FolderKanban, href: "/admin/modules/projects" }, { label: "Renewals", icon: CalendarDays, href: "/admin/renewals" },
+  ]},
+  { label: "FINANCE", items: [
+    { label: "Sales", icon: BriefcaseBusiness, href: "/admin/sales" }, { label: "Quotations", icon: FileText, href: "/admin/quotations" }, { label: "Invoices", icon: FileText, href: "/admin/invoices" }, { label: "Bank & Cash", icon: CircleDollarSign, href: "/admin/accounts" }, { label: "Team Wallets", icon: CircleDollarSign, href: "/admin/wallets" }, { label: "Assets", icon: Package, href: "/admin/assets" },
+  ]},
+  { label: "ADMINISTRATION", items: [
+    { label: "Users", icon: UsersRound, href: "/admin/users" }, { label: "Reports", icon: BarChart3, href: "/admin/reports" }, { label: "Audit Log", icon: ScrollText, href: "/admin/audit" },
   ]},
 ];
 
 export function Sidebar({ open, onClose, user, inboxCount = 0 }: { open: boolean; onClose: () => void; user?: { firstName: string; lastName: string; jobTitle?: string }; inboxCount?: number }) {
+  const pathname = usePathname();
   const fullName = user ? `${user.firstName} ${user.lastName}` : "Account";
   const initials = user ? `${user.firstName[0] ?? ""}${user.lastName[0] ?? ""}`.toUpperCase() : "A";
   return (
@@ -56,15 +64,17 @@ export function Sidebar({ open, onClose, user, inboxCount = 0 }: { open: boolean
           <div key={group.label} className="mb-5">
             <div className="mb-2 px-3 text-[10px] font-semibold tracking-[.16em] text-white/35">{group.label}</div>
             <div className="space-y-1">
-              {group.items.map(({ label, icon: Icon, href, active }) => (
+              {group.items.map(({ label, icon: Icon, href }) => {
+                const active = href === "/admin" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+                return (
                 <Link href={href} key={label} className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition",
                   active ? "bg-[#d8a64c] font-semibold text-[#172d28]" : "text-white/68 hover:bg-white/[.06] hover:text-white",
                 )}>
                   <Icon size={18}/><span>{label}</span>
-                  {label === "Inbox" && inboxCount > 0 && <span className="ml-auto rounded-full bg-[#da5151] px-2 py-0.5 text-[10px] font-bold text-white">{inboxCount > 99 ? "99+" : inboxCount}</span>}
+                  {label === "All Work" && inboxCount > 0 && <span className="ml-auto rounded-full bg-[#da5151] px-2 py-0.5 text-[10px] font-bold text-white">{inboxCount > 99 ? "99+" : inboxCount}</span>}
                 </Link>
-              ))}
+              )})}
             </div>
           </div>
         ))}

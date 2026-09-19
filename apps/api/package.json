@@ -33,6 +33,7 @@
     "@types/node": "latest",
     "@types/nodemailer": "^8.0.1",
     "tsx": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "typescript-eslint": "^8.69.0"
   }
 }

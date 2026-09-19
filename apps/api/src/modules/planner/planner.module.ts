@@ -21,7 +21,7 @@ class PlannerController {
     const end = to ? new Date(to) : new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
     const tasks = await this.prisma.task.findMany({
       where: { dueDate: { gte: start, lte: end }, createdBy: { organizationId: request.user.organizationId }, ...(userId ? { assignments: { some: { userId } } } : {}) },
-      include: { project: { select: { name: true, code: true } }, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } },
+      include: { taskType: true, project: { select: { name: true, code: true, client: { select: { id: true, name: true } } } }, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } },
       orderBy: [{ dueDate: "asc" }, { priorityScore: "desc" }],
     });
     return tasks.map((task) => ({ ...task, timing: task.status === "COMPLETED" || task.status === "ACCEPTED" ? "COMPLETED" : task.dueDate && task.dueDate < new Date() ? "OVERDUE" : "UPCOMING" }));

@@ -6,8 +6,8 @@ import { API_URL, getSession, saveSession } from "@/lib/auth";
 import Link from "next/link";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("admin@aurilink.local");
-  const [password, setPassword] = useState("ChangeMe123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,7 +16,7 @@ export default function LoginPage() {
   async function submit(event: FormEvent) {
     event.preventDefault(); setLoading(true); setError("");
     try {
-      const response = await fetch(`${API_URL}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+      const response = await fetch(`${API_URL}/auth/login`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "Login failed");
       saveSession(data.accessToken, data.user);
@@ -41,7 +41,7 @@ export default function LoginPage() {
           {error && <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
           <button disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#176b5b] py-3.5 text-sm font-bold text-white hover:bg-[#115548] disabled:opacity-60">{loading ? "Signing in..." : "Sign in"}<ArrowRight size={17}/></button>
         </form>
-        <div className="mt-7 rounded-xl bg-[#f4f7f5] p-4 text-xs leading-5 text-[#66736e]"><strong>Employee demo:</strong> employee@aurilink.local<br/>Password: Employee123!</div>
+        {process.env.NODE_ENV !== "production" && <div className="mt-7 rounded-xl bg-[#f4f7f5] p-4 text-xs leading-5 text-[#66736e]"><strong>Development account:</strong> employee@aurilink.local<br/>Password: Employee123!</div>}
       </section>
     </div>
   </main>;

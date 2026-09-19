@@ -26,7 +26,7 @@ class ReportsController {
       this.prisma.walletTransaction.findMany({ where: { wallet: { user: { organizationId } }, type: "PAYMENT", createdAt: period }, include: { wallet: { select: { user: { select: { firstName: true, lastName: true } } } }, financialAccount: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
       this.prisma.invoice.findMany({ where: { organizationId, status: { not: "VOID" }, OR: [{ issueDate: period }, { dueDate: period }] }, include: { client: { select: { name: true } }, project: { select: { code: true } }, payments: true }, orderBy: { dueDate: "asc" } }),
       this.prisma.task.findMany({ where: { createdBy: { organizationId }, status: "ACCEPTED", acceptedAt: period }, select: { id: true, title: true, acceptedAt: true, laborCost: true, project: { select: { code: true, client: { select: { name: true } } } } }, orderBy: { acceptedAt: "desc" } }),
-      this.prisma.clientTransaction.findMany({ where: { account: { client: { organizationId } }, createdAt: period }, include: { account: { select: { client: { select: { name: true } } } }, project: { select: { code: true } }, task: { select: { title: true } } }, orderBy: { createdAt: "desc" } }),
+      this.prisma.clientTransaction.findMany({ where: { account: { client: { organizationId } }, createdAt: period }, include: { account: { select: { client: { select: { name: true } } } }, invoice: { select: { invoiceNumber: true } }, project: { select: { code: true } }, task: { select: { title: true } } }, orderBy: { createdAt: "desc" } }),
     ]);
     const revenue = invoicePayments.reduce((sum, item) => sum + Number(item.amount), 0);
     const laborCost = acceptedTasks.reduce((sum, item) => sum + Number(item.laborCost ?? 0), 0);
@@ -41,7 +41,7 @@ class ReportsController {
       employees: users.map((user) => ({ id: user.id, name: `${user.firstName} ${user.lastName}`, status: user.status, assigned: user.assignments.length, completed: user.assignments.filter(({ task }) => ["COMPLETED", "ACCEPTED"].includes(task.status)).length, earned: user.assignments.reduce((sum, { task }) => sum + Number(task.laborCost ?? 0), 0), wallet: Number(user.wallet?.balance ?? 0) })),
       invoices: invoiceRows,
       payments: { received: invoicePayments.map((payment) => ({ id: payment.id, date: payment.paidAt, party: payment.invoice.client.name, description: payment.invoice.invoiceNumber, method: payment.method, reference: payment.reference, amount: Number(payment.amount) })), paid: employeePayments.map((payment) => ({ id: payment.id, date: payment.createdAt, party: `${payment.wallet.user.firstName} ${payment.wallet.user.lastName}`, description: payment.description, account: payment.financialAccount?.name, reference: payment.reference, amount: Math.abs(Number(payment.amount)) })) },
-      clientTransactions: clientTransactions.map((item) => ({ id: item.id, date: item.createdAt, client: item.account.client.name, type: item.type, description: item.description, project: item.project?.code, task: item.task?.title, amount: Number(item.amount), balanceAfter: Number(item.balanceAfter) })),
+      clientTransactions: clientTransactions.map((item) => ({ id: item.id, date: item.createdAt, client: item.account.client.name, type: item.type, description: item.description, invoice: item.invoice?.invoiceNumber, project: item.project?.code, task: item.task?.title, amount: Number(item.amount), balanceAfter: Number(item.balanceAfter) })),
     };
   }
 }

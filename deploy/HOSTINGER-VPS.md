@@ -1,6 +1,6 @@
 # Hostinger VPS deployment
 
-Replace every `YOUR_DOMAIN` with the real domain or subdomain, for example `system.example.com`.
+Current deployment domain: `workspace.auricodesolutions.com`.
 
 ## 1. Point the domain to the VPS
 
@@ -25,14 +25,15 @@ Install Node.js 22 LTS before installing the project dependencies.
 
 ## 3. Configure and build
 
-Upload or clone the project into `/var/www/aurilink-system`, then run:
+The CloudPanel site directory is `/home/workspace/htdocs/workspace.auricodesolutions.com`.
 
 ```bash
-cd /var/www/aurilink-system
+cd /home/workspace/htdocs/workspace.auricodesolutions.com
 cp .env.example .env
 nano .env
 npm ci
 npm run generate -w @aurilink/database
+npm run db:push -w @aurilink/database
 npm run build
 ```
 
@@ -41,8 +42,8 @@ At minimum, set these real values in `.env`:
 ```dotenv
 DATABASE_URL="mysql://USER:PASSWORD@MYSQL_HOST:3306/DATABASE"
 JWT_SECRET="GENERATE_A_LONG_RANDOM_SECRET"
-WEB_URL="https://YOUR_DOMAIN"
-NEXT_PUBLIC_API_URL="https://YOUR_DOMAIN/api/v1"
+WEB_URL="https://workspace.auricodesolutions.com"
+NEXT_PUBLIC_API_URL="https://workspace.auricodesolutions.com/api/v1"
 ```
 
 Also configure the SMTP values from `.env.example` if forgotten-password emails should work.
@@ -52,7 +53,7 @@ Important: `NEXT_PUBLIC_API_URL` is embedded during the web build. Set it before
 ## 4. Start both services with PM2
 
 ```bash
-cd /var/www/aurilink-system
+cd /home/workspace/htdocs/workspace.auricodesolutions.com
 pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup
@@ -106,14 +107,16 @@ sudo ufw allow 'Nginx Full'
 sudo ufw enable
 ```
 
-Do not publicly open ports 3100, 4000, or 3306. Nginx accesses the applications locally, and MySQL should allow only trusted connections.
+Do not publicly open ports 3100, 4100, or 3306. Nginx accesses the applications locally, and MySQL should allow only trusted connections.
 
 ## Updating the application later
 
 ```bash
-cd /var/www/aurilink-system
+cd /home/workspace/htdocs/workspace.auricodesolutions.com
+git pull --ff-only origin main
 npm ci
 npm run generate -w @aurilink/database
+npm run db:push -w @aurilink/database
 npm run build
 pm2 restart ecosystem.config.cjs --update-env
 ```

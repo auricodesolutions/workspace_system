@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Banknote, Package, Plus, Settings, TrendingDown, X } from "lucide-react";
+import { ArrowLeft, Banknote, Package, Plus, Settings, X } from "lucide-react";
 import { authFetch, getSession } from "@/lib/auth";
 type Account={id:string;name:string;balance:string;active:boolean}; type User={id:string;firstName:string;lastName:string}; type Event={id:string;type:string;amount:string;eventDate:string;description:string;reference?:string;financialAccount?:{name:string}};
 type Asset={id:string;code:string;name:string;category?:string;serialNumber?:string;status:string;purchaseDate:string;purchaseCost:string;salvageValue:string;usefulLifeMonths?:number;currentBookValue:number;accumulatedDepreciation:number;dailyDepreciation:number;serviceCost:number;soldAt?:string;salePrice?:string;assignedTo?:User;events:Event[]};

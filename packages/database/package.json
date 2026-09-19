@@ -9,6 +9,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:clean": "tsx prisma/clean.ts",
+    "import:clients": "tsx prisma/import-clients.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

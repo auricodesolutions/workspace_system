@@ -49,6 +49,8 @@ enum WalletTransactionStatus {
 
 enum ClientTransactionType {
   TASK_CHARGE
+  PROJECT_CHARGE
+  INVOICE_CHARGE
   RENEWAL_CHARGE
   PAYMENT
   ADJUSTMENT
@@ -74,6 +76,7 @@ enum FinancialAccountType {
 
 enum AccountTransactionType {
   DEPOSIT
+  CLIENT_PAYMENT
   WITHDRAWAL
   EMPLOYEE_PAYMENT
   ASSET_PURCHASE
@@ -138,6 +141,18 @@ enum ApprovalStatus {
   CANCELLED
 }
 
+enum MeetingStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum MeetingItemStatus {
+  ONGOING
+  COMPLETED
+}
+
 model Organization {
   id            String         @id @default(cuid())
   name          String
@@ -152,6 +167,8 @@ model Organization {
   auditLogs     AuditLog[]
   financialAccounts FinancialAccount[]
   assets        Asset[]
+  meetings      WeeklyMeeting[]
+  taskTypes     TaskType[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 }
@@ -203,6 +220,8 @@ model User {
   auditLogs      AuditLog[]
   assignedAssets Asset[]
   passwordResetTokens PasswordResetToken[]
+  meetingAssignments MeetingParticipant[]
+  createdMeetings WeeklyMeeting[] @relation("MeetingCreator")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -280,6 +299,7 @@ model Client {
   industry       String?
   status         ClientStatus @default(LEAD)
   projects       Project[]
+  meetingItems   MeetingItem[]
   invoices       Invoice[]
   quotations     Quotation[]
   account        ClientAccount?
@@ -305,6 +325,9 @@ model Project {
   budget         Decimal? @db.Decimal(14, 2)
   estimatedHours Decimal? @db.Decimal(8, 2)
   taskCostTotal  Decimal @default(0) @db.Decimal(14, 2)
+  completionPrice Decimal? @db.Decimal(14, 2)
+  completedAt    DateTime?
+  clientChargedAt DateTime?
   tasks          Task[]
   invoices       Invoice[]
   quotations     Quotation[]
@@ -321,8 +344,10 @@ model Project {
 model Task {
   id             String @id @default(cuid())
   projectId      String?
+  taskTypeId     String?
   createdById    String
   project        Project? @relation(fields: [projectId], references: [id])
+  taskType       TaskType? @relation(fields: [taskTypeId], references: [id], onDelete: SetNull)
   createdBy      User @relation("TaskCreator", fields: [createdById], references: [id])
   title          String
   description    String?
@@ -344,11 +369,79 @@ model Task {
   revisions      TaskRevision[]
   walletTransactions WalletTransaction[]
   clientTransactions ClientTransaction[]
+  meetingItems   MeetingItem[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   @@index([projectId])
+  @@index([taskTypeId])
   @@index([status, dueDate])
   @@index([priorityScore])
+}
+
+model TaskType {
+  id             String @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  color          String @default("#176b5b")
+  active         Boolean @default(true)
+  tasks          Task[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+}
+
+model WeeklyMeeting {
+  id             String @id @default(cuid())
+  organizationId String
+  createdById    String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      User @relation("MeetingCreator", fields: [createdById], references: [id])
+  title          String
+  scheduledAt    DateTime
+  remarks        String?
+  specialNotes   String?
+  status         MeetingStatus @default(SCHEDULED)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  participants   MeetingParticipant[]
+  items          MeetingItem[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([organizationId, scheduledAt])
+  @@index([status, scheduledAt])
+}
+
+model MeetingParticipant {
+  meetingId String
+  userId    String
+  meeting   WeeklyMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+  @@id([meetingId, userId])
+  @@index([userId])
+}
+
+model MeetingItem {
+  id          String @id @default(cuid())
+  meetingId   String
+  clientId    String?
+  taskId      String?
+  meeting     WeeklyMeeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  client      Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  task        Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  title       String
+  notes       String?
+  status      MeetingItemStatus @default(ONGOING)
+  completedAt DateTime?
+  completedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([meetingId, status])
+  @@index([clientId])
+  @@index([taskId])
 }
 
 model TaskAssignment {
@@ -385,6 +478,7 @@ model Invoice {
   items          InvoiceItem[]
   notes          String?
   sourceQuotation Quotation?
+  clientTransactions ClientTransaction[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   @@unique([businessUnitId, invoiceNumber])
@@ -452,13 +546,17 @@ model QuotationItem {
 model Payment {
   id          String @id @default(cuid())
   invoiceId   String
+  financialAccountId String?
   invoice     Invoice @relation(fields: [invoiceId], references: [id])
+  financialAccount FinancialAccount? @relation(fields: [financialAccountId], references: [id])
   amount      Decimal @db.Decimal(14, 2)
   paidAt      DateTime
   method      String?
   reference   String?
+  accountTransactions AccountTransaction[]
   createdAt   DateTime @default(now())
   @@index([invoiceId])
+  @@index([financialAccountId])
 }
 
 model AuditLog {
@@ -567,6 +665,7 @@ model FinancialAccount {
   fundedTasks   Task[]
   walletTransactions WalletTransaction[]
   transactions  AccountTransaction[]
+  receivedPayments Payment[]
   invoices      Invoice[]
   assetEvents   AssetEvent[]
   createdAt     DateTime @default(now())
@@ -621,7 +720,11 @@ model AssetEvent {
 model AccountTransaction {
   id             String @id @default(cuid())
   financialAccountId String
+  paymentId      String?
+  clientTransactionId String?
   financialAccount FinancialAccount @relation(fields: [financialAccountId], references: [id], onDelete: Cascade)
+  payment        Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  clientTransaction ClientTransaction? @relation(fields: [clientTransactionId], references: [id], onDelete: SetNull)
   type           AccountTransactionType
   amount         Decimal @db.Decimal(14, 2)
   balanceAfter   Decimal @db.Decimal(14, 2)
@@ -629,6 +732,8 @@ model AccountTransaction {
   reference      String?
   createdAt      DateTime @default(now())
   @@index([financialAccountId, createdAt])
+  @@index([paymentId])
+  @@index([clientTransactionId])
 }
 
 model ClientAccount {
@@ -648,11 +753,15 @@ model ClientTransaction {
   taskId       String?
   projectId    String?
   renewalId    String?
+  invoiceId    String?
+  invoiceChargeKey String?
   renewalDueDate DateTime?
   account      ClientAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   task         Task? @relation(fields: [taskId], references: [id])
   project      Project? @relation(fields: [projectId], references: [id])
   renewal      ProjectRenewal? @relation(fields: [renewalId], references: [id])
+  invoice      Invoice? @relation(fields: [invoiceId], references: [id])
+  accountTransactions AccountTransaction[]
   type         ClientTransactionType
   status       ClientTransactionStatus
   amount       Decimal @db.Decimal(14, 2)
@@ -664,6 +773,8 @@ model ClientTransaction {
   @@index([taskId])
   @@index([projectId])
   @@index([renewalId])
+  @@index([invoiceId])
+  @@index([invoiceChargeKey])
   @@unique([taskId, type])
   @@index([renewalId, renewalDueDate, type])
 }

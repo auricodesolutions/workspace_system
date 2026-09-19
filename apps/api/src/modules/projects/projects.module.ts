@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Inject, Module, Patch, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Inject, Module, Patch, Param, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { IsIn, IsISO8601, IsNumber, IsOptional, IsString, MinLength } from "class-validator";
+import { IsIn, IsISO8601, IsNumber, IsOptional, IsString, Min, MinLength } from "class-validator";
 import { JwtAuthGuard } from "../../auth/jwt-auth.guard.js";
 import { Roles, RolesGuard } from "../../auth/roles.guard.js";
 import type { AuthRequest } from "../../auth/auth.types.js";
@@ -19,6 +19,7 @@ class CreateProjectDto {
   @IsIn(priorities) priority!: typeof priorities[number];
 }
 class ProjectStatusDto { @IsIn(projectStatuses) status!: typeof projectStatuses[number]; }
+class CompleteProjectDto { @IsNumber() @Min(0) cost!: number; }
 class UpdateProjectDto {
   @IsOptional() @IsString() @MinLength(3) name?: string;
   @IsOptional() @IsString() description?: string;
@@ -47,7 +48,7 @@ class ProjectsController {
 
   @Get(":id")
   async detail(@Req() request: AuthRequest, @Param("id") id: string) {
-    return this.prisma.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } }, include: { client: true, tasks: { include: { assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } }, orderBy: { createdAt: "desc" } }, invoices: { include: { payments: true }, orderBy: { createdAt: "desc" } } } });
+    return this.prisma.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } }, include: { client: true, tasks: { include: { taskType: true, assignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } }, orderBy: { createdAt: "desc" } }, invoices: { include: { payments: true }, orderBy: { createdAt: "desc" } } } });
   }
 
   @Post()
@@ -62,7 +63,9 @@ class ProjectsController {
 
   @Patch(":id")
   async update(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: UpdateProjectDto) {
-    await this.prisma.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } } });
+    const existing = await this.prisma.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } } });
+    if (dto.status === "COMPLETED" && existing.status !== "COMPLETED") throw new BadRequestException("Complete the project using the final project charge option");
+    if (existing.status === "COMPLETED" && dto.status && dto.status !== "COMPLETED") throw new BadRequestException("A completed project is final and cannot be reopened");
     const project = await this.prisma.project.update({ where: { id }, data: { name: dto.name, description: dto.description, clientId: dto.clientId || undefined, startDate: dto.startDate ? new Date(dto.startDate) : undefined, dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined, budget: dto.budget, priority: dto.priority, status: dto.status } });
     await this.prisma.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "UPDATE", entityType: "PROJECT", entityId: id, summary: `Updated project ${project.code}`, metadata: { name: dto.name ?? null, status: dto.status ?? null, priority: dto.priority ?? null } } });
     return project;
@@ -70,10 +73,32 @@ class ProjectsController {
 
   @Patch(":id/status")
   async updateStatus(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: ProjectStatusDto) {
-    await this.prisma.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } } });
+    const existing = await this.prisma.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } } });
+    if (dto.status === "COMPLETED") throw new BadRequestException("Complete the project using the final project charge option");
+    if (existing.status === "COMPLETED") throw new BadRequestException("A completed project is final and cannot be reopened");
     const project = await this.prisma.project.update({ where: { id }, data: { status: dto.status } });
     await this.prisma.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "STATUS_CHANGE", entityType: "PROJECT", entityId: id, summary: `Changed ${project.code} status to ${dto.status}` } });
     return project;
+  }
+
+  @Post(":id/complete")
+  async complete(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: CompleteProjectDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const project = await tx.project.findFirstOrThrow({ where: { id, businessUnit: { organizationId: request.user.organizationId } }, include: { client: { select: { id: true, name: true } } } });
+      if (project.status === "COMPLETED") throw new BadRequestException("This project has already been completed");
+
+      const completedAt = new Date();
+      const claimed = await tx.project.updateMany({
+        where: { id, status: { not: "COMPLETED" } },
+        data: { status: "COMPLETED", completionPrice: dto.cost, completedAt, clientChargedAt: null },
+      });
+      if (claimed.count !== 1) throw new BadRequestException("This project has already been completed");
+
+      await tx.auditLog.create({
+        data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "COMPLETE", entityType: "PROJECT", entityId: project.id, summary: `Completed ${project.code} with final value LKR ${dto.cost}`, metadata: { projectCost: dto.cost, clientId: project.clientId ?? null, clientCharged: false, receivableSource: "INVOICE" } },
+      });
+      return tx.project.findUniqueOrThrow({ where: { id }, include: { client: true } });
+    });
   }
 }
 

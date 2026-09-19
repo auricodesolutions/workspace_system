@@ -17,6 +17,7 @@ class CreateClientDto {
 }
 class ClientPaymentDto {
   @IsNumber() @Min(0.01) amount!: number;
+  @IsString() financialAccountId!: string;
   @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsString() note?: string;
 }
@@ -37,7 +38,7 @@ class ClientsController {
 
   @Get()
   async list(@Req() request: AuthRequest) {
-    const clients = await this.prisma.client.findMany({ where: { organizationId: request.user.organizationId }, include: { account: { include: { transactions: { include: { task: { select: { title: true, revisionCount: true } }, project: { select: { code: true, name: true } } }, orderBy: { createdAt: "desc" }, take: 100 } } }, _count: { select: { projects: true } } }, orderBy: { name: "asc" } });
+    const clients = await this.prisma.client.findMany({ where: { organizationId: request.user.organizationId }, include: { account: { include: { transactions: { include: { invoice: { select: { id: true, invoiceNumber: true, status: true } }, task: { select: { title: true, revisionCount: true } }, project: { select: { code: true, name: true } } }, orderBy: { createdAt: "desc" }, take: 100 } } }, _count: { select: { projects: true } } }, orderBy: { name: "asc" } });
     return clients.map((client) => ({ ...client, account: client.account ?? { balance: 0, currency: "LKR", transactions: [] } }));
   }
 
@@ -63,11 +64,14 @@ class ClientsController {
   async recordPayment(@Req() request: AuthRequest, @Param("id") id: string, @Body() dto: ClientPaymentDto) {
     await this.prisma.client.findFirstOrThrow({ where: { id, organizationId: request.user.organizationId } });
     return this.prisma.$transaction(async (tx) => {
+      const receivingAccount = await tx.financialAccount.findFirstOrThrow({ where: { id: dto.financialAccountId, organizationId: request.user.organizationId, active: true } });
       const account = await tx.clientAccount.upsert({ where: { clientId: id }, update: {}, create: { clientId: id } });
       if (Number(account.balance) < dto.amount) throw new BadRequestException("Payment cannot exceed the client's outstanding balance");
       const updated = await tx.clientAccount.update({ where: { id: account.id }, data: { balance: { decrement: dto.amount } } });
       const transaction = await tx.clientTransaction.create({ data: { accountId: account.id, type: "PAYMENT", status: "PAID", amount: -dto.amount, balanceAfter: updated.balance, description: dto.note || "Client payment received", reference: dto.reference } });
-      await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "PAYMENT", entityType: "CLIENT", entityId: id, summary: `Recorded client payment of LKR ${dto.amount}`, metadata: { amount: dto.amount, reference: dto.reference } } });
+      const updatedFinancialAccount = await tx.financialAccount.update({ where: { id: receivingAccount.id }, data: { balance: { increment: dto.amount } } });
+      await tx.accountTransaction.create({ data: { financialAccountId: receivingAccount.id, clientTransactionId: transaction.id, type: "CLIENT_PAYMENT", amount: dto.amount, balanceAfter: updatedFinancialAccount.balance, description: dto.note || "Client payment received", reference: dto.reference } });
+      await tx.auditLog.create({ data: { organizationId: request.user.organizationId, actorId: request.user.id, action: "PAYMENT", entityType: "CLIENT", entityId: id, summary: `Recorded client payment of LKR ${dto.amount} into ${receivingAccount.name}`, metadata: { amount: dto.amount, reference: dto.reference, financialAccountId: receivingAccount.id } } });
       return { account: updated, transaction };
     });
   }
